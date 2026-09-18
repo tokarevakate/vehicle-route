@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Vehicle Route Fuel Optimization</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4QZ8JpEe7xbqh6HwPp3lGaUyGkSgFvZ8CgtGJWSJ04="
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="/static/style.css" />
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  </head>
+  <body>
+    <div id="layout">
+      <div id="map-container">
+        <div id="map"></div>
+      </div>
+      <div id="sidebar">
+        <h2>Параметры движения</h2>
+
+        <div class="metric">
+          <span>Текущая скорость:</span>
+          <span id="metric-speed">–</span>
+        </div>
+        <div class="metric">
+          <span>Время в пути:</span>
+          <span id="metric-time">–</span>
+        </div>
+        <div class="metric">
+          <span>Пройденный путь:</span>
+          <span id="metric-distance">–</span>
+        </div>
+        <div class="metric">
+          <span>Уклон:</span>
+          <span id="metric-grade">–</span>
+        </div>
+
+        <h3>Профиль высоты</h3>
+        <canvas id="chart-elevation"></canvas>
+
+        <h3>Профиль уклонов</h3>
+        <canvas id="chart-grade"></canvas>
+
+        <h3>Оптимальная скорость</h3>
+        <div id="optimal-speed-block">
+          <span id="optimal-speed-value">–</span> км/ч
+        </div>
+
+        <div class="controls">
+          <button id="btn-start">Запустить анимацию</button>
+          <button id="btn-pause">Пауза</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
