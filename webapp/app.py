@@ -61,7 +61,7 @@ def load_route_points():
 
     lat_col = _detect_column(cols, ["lat", "latitude", "Lat", "LAT"])
     lon_col = _detect_column(cols, ["lon", "lng", "longitude", "Lon", "LON"])
-    elev_col = _detect_column(cols, ["elev", "elevation", "alt", "height", "Altitude", "ALT"])
+    elev_col = _detect_column(cols, ["elev", "elevation", "alt", "height", "altitude", "ALT"])
 
     if lat_col is None or lon_col is None:
         raise RuntimeError(
