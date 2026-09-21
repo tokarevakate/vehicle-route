@@ -6,6 +6,7 @@ let passedPolyline = null;
 let combinedChart = null;
 let animIndex = 0;
 let animTimer = null;
+let isPlaying = false;  // ← добавлен явный флаг состояния
 let startTimeMs = null;
 let playbackSpeed = 1;
 const BASE_INTERVAL_MS = 300;
@@ -193,12 +194,14 @@ function stepAnimation() {
 
 function pauseAnim() {
   if (animTimer) { clearInterval(animTimer); animTimer = null; }
+  isPlaying = false;  // ← сбрасываем флаг
   document.getElementById("btn-playpause").textContent = "▶";
 }
 
 function startAnim() {
   if (animTimer) clearInterval(animTimer);
   animTimer = setInterval(stepAnimation, BASE_INTERVAL_MS / playbackSpeed);
+  isPlaying = true;  // ← устанавливаем флаг
   document.getElementById("btn-playpause").textContent = "⏸";
 }
 
@@ -210,7 +213,7 @@ function setupControls() {
   slider.max   = routePoints.length - 1;
 
   document.getElementById("btn-playpause").addEventListener("click", () => {
-    if (animTimer) {
+    if (isPlaying) {           // ← проверяем флаг, а не animTimer
       pauseAnim();
     } else {
       if (animIndex >= routePoints.length - 1) animIndex = 0;
@@ -235,7 +238,7 @@ function setupControls() {
       playbackSpeed = parseFloat(btn.dataset.speed);
       document.querySelectorAll(".speed-btn").forEach(b => b.classList.remove("active"));
       btn.classList.add("active");
-      if (animTimer) { pauseAnim(); startAnim(); }
+      if (isPlaying) { pauseAnim(); startAnim(); }  // ← тоже через флаг
     });
   });
 }
