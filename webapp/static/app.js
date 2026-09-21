@@ -3,217 +3,275 @@ let leafletMap = null;
 let marker = null;
 let mainPolyline = null;
 let passedPolyline = null;
-let chartElevation = null;
-let chartGrade = null;
+let combinedChart = null;
 let animIndex = 0;
 let animTimer = null;
 let startTimeMs = null;
+let playbackSpeed = 1;        // multiplier: 0.5 / 1 / 2 / 4
+const BASE_INTERVAL_MS = 300; // base ms per point at 1×
 
-// Simulated current speed with smoothed noise around optimal
-let currentSpeedSimulated = null;
+// ─────────────────────────────────────────
+// GAUGE helpers
+// ─────────────────────────────────────────
+const GAUGE_V_MIN = 0;
+const GAUGE_V_MAX = 90;
+const GAUGE_CX = 100, GAUGE_CY = 108, GAUGE_R = 80;
+const GAUGE_START_DEG = 210; // degrees, clockwise from +x
+const GAUGE_END_DEG   = 330; // total sweep = 240°
 
-/** Return a simulated "actual" speed: optimal ± random noise clamped to [v-8, v+8]. */
-function simulateCurrentSpeed(optimalSpeed) {
-  if (currentSpeedSimulated === null) {
-    currentSpeedSimulated = optimalSpeed;
-  }
-  // Random walk: nudge toward optimal, add small noise
-  const noise = (Math.random() - 0.5) * 4.0;       // ±2 km/h per step
-  const pull  = (optimalSpeed - currentSpeedSimulated) * 0.15; // drift toward optimal
-  currentSpeedSimulated = currentSpeedSimulated + pull + noise;
-  // Clamp to ±8 km/h around optimal
-  const lo = Math.max(20, optimalSpeed - 8);
-  const hi = optimalSpeed + 8;
-  currentSpeedSimulated = Math.max(lo, Math.min(hi, currentSpeedSimulated));
-  return currentSpeedSimulated;
+function degToRad(d) { return d * Math.PI / 180; }
+
+function arcPath(cx, cy, r, startDeg, endDeg) {
+  const s = degToRad(startDeg);
+  const e = degToRad(endDeg);
+  const x1 = cx + r * Math.cos(s);
+  const y1 = cy + r * Math.sin(s);
+  const x2 = cx + r * Math.cos(e);
+  const y2 = cy + r * Math.sin(e);
+  const large = (endDeg - startDeg) > 180 ? 1 : 0;
+  return `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2}`;
 }
 
+function initGauge() {
+  const bg = document.getElementById("gauge-bg");
+  bg.setAttribute("d", arcPath(GAUGE_CX, GAUGE_CY, GAUGE_R, GAUGE_START_DEG, GAUGE_START_DEG + 240));
+}
+
+function updateGauge(speed) {
+  const arc   = document.getElementById("gauge-arc");
+  const label = document.getElementById("gauge-value");
+
+  const pct    = Math.min(1, Math.max(0, (speed - GAUGE_V_MIN) / (GAUGE_V_MAX - GAUGE_V_MIN)));
+  const sweep  = pct * 240;
+  arc.setAttribute("d", arcPath(GAUGE_CX, GAUGE_CY, GAUGE_R, GAUGE_START_DEG, GAUGE_START_DEG + sweep));
+
+  // colour: green → yellow → red
+  let color;
+  if (speed <= 50)      color = "#437a22";
+  else if (speed <= 65) color = "#d19900";
+  else                  color = "#a13544";
+  arc.setAttribute("stroke", color);
+
+  label.textContent = speed.toFixed(1);
+  label.setAttribute("fill", color);
+}
+
+// ─────────────────────────────────────────
+// DATA LOADING
+// ─────────────────────────────────────────
 async function loadRoute() {
   const resp = await fetch("/api/route");
-  if (!resp.ok) {
-    throw new Error("Не удалось загрузить маршрут: " + resp.statusText);
-  }
+  if (!resp.ok) throw new Error("Не удалось загрузить маршрут: " + resp.statusText);
   const data = await resp.json();
   routePoints = data.points || [];
 }
 
+// ─────────────────────────────────────────
+// MAP
+// ─────────────────────────────────────────
 function initMap() {
   if (!routePoints.length) return;
-
   leafletMap = L.map("map");
-
-  const latlngs = routePoints.map((p) => [p.lat, p.lon]);
-  mainPolyline = L.polyline(latlngs, { color: "#01696f" }).addTo(leafletMap);
-  passedPolyline = L.polyline([], { color: "#da7101" }).addTo(leafletMap);
-
+  const latlngs = routePoints.map(p => [p.lat, p.lon]);
+  mainPolyline  = L.polyline(latlngs, { color: "#01696f" }).addTo(leafletMap);
+  passedPolyline= L.polyline([], { color: "#da7101" }).addTo(leafletMap);
   leafletMap.fitBounds(mainPolyline.getBounds());
-
   marker = L.marker(latlngs[0]).addTo(leafletMap);
 }
 
-function initCharts() {
-  const ctxElev = document
-    .getElementById("chart-elevation")
-    .getContext("2d");
-  const ctxGrade = document.getElementById("chart-grade").getContext("2d");
+// ─────────────────────────────────────────
+// COMBINED CHART  (elevation area + grade bars, cursor line)
+// ─────────────────────────────────────────
+function initCombinedChart() {
+  const ctx = document.getElementById("chart-combined").getContext("2d");
 
-  chartElevation = new Chart(ctxElev, {
-    type: "line",
+  const labels   = routePoints.map((_, i) => i);
+  const elevData = routePoints.map(p => p.elevation ?? 0);
+  const gradeData= routePoints.map(p => p.grade ?? 0);
+
+  // Build gradient for elevation (green→brown→grey)
+  const gradient = ctx.createLinearGradient(0, 0, 0, 200);
+  gradient.addColorStop(0,   "rgba(150,100,50,0.7)");
+  gradient.addColorStop(0.5, "rgba(80,140,60,0.5)");
+  gradient.addColorStop(1,   "rgba(80,140,60,0.05)");
+
+  combinedChart = new Chart(ctx, {
     data: {
-      labels: [],
+      labels,
       datasets: [
         {
+          type: "line",
           label: "Высота, м",
-          data: [],
-          borderColor: "#006494",
-          tension: 0.25,
+          data: elevData,
+          borderColor: "#6d5a3a",
+          backgroundColor: gradient,
+          fill: true,
+          tension: 0.3,
           pointRadius: 0,
+          yAxisID: "yElev",
+          order: 2,
         },
-      ],
-    },
-    options: {
-      animation: false,
-      responsive: true,
-      scales: {
-        x: { display: false },
-        y: { title: { display: true, text: "м" } },
-      },
-      plugins: {
-        legend: { display: false },
-      },
-    },
-  });
-
-  chartGrade = new Chart(ctxGrade, {
-    type: "line",
-    data: {
-      labels: [],
-      datasets: [
         {
+          type: "bar",
           label: "Уклон, %",
-          data: [],
-          borderColor: "#a13544",
-          tension: 0.25,
-          pointRadius: 0,
+          data: gradeData,
+          backgroundColor: gradeData.map(g => g >= 0 ? "rgba(67,122,34,0.7)" : "rgba(0,100,148,0.7)"),
+          yAxisID: "yGrade",
+          order: 1,
+          barPercentage: 1.0,
+          categoryPercentage: 1.0,
         },
       ],
     },
     options: {
       animation: false,
       responsive: true,
+      interaction: { mode: "index", intersect: false },
       scales: {
         x: { display: false },
-        y: { title: { display: true, text: "%" } },
+        yElev:  { position: "left",  title: { display: true, text: "м" },    grid: { drawOnChartArea: true  } },
+        yGrade: { position: "right", title: { display: true, text: "%" },    grid: { drawOnChartArea: false } },
       },
       plugins: {
-        legend: { display: false },
+        legend: { display: true, position: "bottom", labels: { boxWidth: 12, font: { size: 11 } } },
+        // cursor vertical line drawn via custom plugin below
       },
     },
+    plugins: [cursorPlugin],
   });
 }
 
+// Custom Chart.js plugin — draws vertical cursor line at current animIndex
+const cursorPlugin = {
+  id: "cursor",
+  afterDraw(chart) {
+    if (animIndex <= 0 || !routePoints.length) return;
+    const meta = chart.getDatasetMeta(0);
+    if (!meta.data || !meta.data[animIndex]) return;
+    const x   = meta.data[animIndex].x;
+    const ctx  = chart.ctx;
+    const yTop = chart.chartArea.top;
+    const yBot = chart.chartArea.bottom;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x, yTop);
+    ctx.lineTo(x, yBot);
+    ctx.strokeStyle = "rgba(161,53,68,0.8)";
+    ctx.lineWidth   = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.stroke();
+    ctx.restore();
+  },
+};
+
+// ─────────────────────────────────────────
+// SIDEBAR METRICS
+// ─────────────────────────────────────────
 function updateSidebar(point, elapsedSeconds) {
-  const speedSpan    = document.getElementById("metric-speed");
-  const timeSpan     = document.getElementById("metric-time");
-  const distSpan     = document.getElementById("metric-distance");
-  const gradeSpan    = document.getElementById("metric-grade");
-  const optSpeedSpan = document.getElementById("optimal-speed-value");
-
-  const optSpeed = point.speed_optimal ?? 0;
-  const curSpeed = simulateCurrentSpeed(optSpeed);
-
-  const distKm = (point.distance ?? 0) / 1000.0;
-  const grade  = point.grade ?? 0;
-
-  // Current (simulated) speed
-  speedSpan.textContent = curSpeed.toFixed(1) + " км/ч";
-  timeSpan.textContent  = elapsedSeconds.toFixed(0) + " с";
-  distSpan.textContent  = distKm.toFixed(2) + " км";
-  gradeSpan.textContent = grade.toFixed(2) + " %";
-
-  // Optimal speed from model
-  optSpeedSpan.textContent = optSpeed.toFixed(1);
-
-  // Visual hint: color the current speed red/green vs optimal
-  const diff = curSpeed - optSpeed;
-  if (Math.abs(diff) <= 2) {
-    speedSpan.style.color = "var(--color-success, #437a22)";
-  } else if (diff > 2) {
-    speedSpan.style.color = "var(--color-notification, #a13544)";
-  } else {
-    speedSpan.style.color = "var(--color-warning, #964219)";
-  }
+  document.getElementById("metric-time").textContent     = elapsedSeconds.toFixed(0) + " с";
+  document.getElementById("metric-distance").textContent = ((point.distance ?? 0) / 1000).toFixed(2) + " км";
+  document.getElementById("metric-grade").textContent    = (point.grade ?? 0).toFixed(2) + " %";
+  updateGauge(point.speed_optimal ?? 0);
 }
 
-function updateCharts(point) {
-  chartElevation.data.labels.push("");
-  chartElevation.data.datasets[0].data.push(point.elevation ?? 0);
-  chartElevation.update();
-
-  chartGrade.data.labels.push("");
-  chartGrade.data.datasets[0].data.push(point.grade ?? 0);
-  chartGrade.update();
-}
-
-function resetCharts() {
-  chartElevation.data.labels = [];
-  chartElevation.data.datasets[0].data = [];
-  chartElevation.update();
-
-  chartGrade.data.labels = [];
-  chartGrade.data.datasets[0].data = [];
-  chartGrade.update();
-}
-
-function stepAnimation() {
-  if (animIndex >= routePoints.length) {
-    clearInterval(animTimer);
-    animTimer = null;
-    return;
-  }
+// ─────────────────────────────────────────
+// ANIMATION STEP
+// ─────────────────────────────────────────
+function applyIndex(idx) {
+  if (idx < 0) idx = 0;
+  if (idx >= routePoints.length) idx = routePoints.length - 1;
+  animIndex = idx;
 
   const point  = routePoints[animIndex];
   const latlng = [point.lat, point.lon];
-
   marker.setLatLng(latlng);
 
-  const passedLatLngs = routePoints
-    .slice(0, animIndex + 1)
-    .map((p) => [p.lat, p.lon]);
-  passedPolyline.setLatLngs(passedLatLngs);
+  passedPolyline.setLatLngs(
+    routePoints.slice(0, animIndex + 1).map(p => [p.lat, p.lon])
+  );
 
-  const now            = performance.now();
-  const elapsedSeconds = (now - startTimeMs) / 1000.0;
+  const elapsed = startTimeMs ? (performance.now() - startTimeMs) / 1000 : 0;
+  updateSidebar(point, elapsed);
 
-  updateSidebar(point, elapsedSeconds);
-  updateCharts(point);
+  // update slider
+  document.getElementById("progress-slider").value = animIndex;
 
-  animIndex += 1;
+  // redraw chart cursor
+  combinedChart.update("none");
 }
 
+function stepAnimation() {
+  if (animIndex >= routePoints.length - 1) {
+    pauseAnim();
+    return;
+  }
+  applyIndex(animIndex + 1);
+}
+
+function pauseAnim() {
+  if (animTimer) { clearInterval(animTimer); animTimer = null; }
+  document.getElementById("btn-playpause").textContent = "▶";
+}
+
+function startAnim() {
+  if (animTimer) clearInterval(animTimer);
+  const interval = BASE_INTERVAL_MS / playbackSpeed;
+  animTimer = setInterval(stepAnimation, interval);
+  document.getElementById("btn-playpause").textContent = "⏸";
+}
+
+// ─────────────────────────────────────────
+// CONTROLS
+// ─────────────────────────────────────────
 function setupControls() {
-  const btnStart = document.getElementById("btn-start");
-  const btnPause = document.getElementById("btn-pause");
+  const slider     = document.getElementById("progress-slider");
+  const btnPlay    = document.getElementById("btn-playpause");
+  const btnRewind  = document.getElementById("btn-rewind");
+  const btnBack    = document.getElementById("btn-back");
+  const btnForward = document.getElementById("btn-forward");
 
-  btnStart.addEventListener("click", () => {
-    if (!routePoints.length) return;
-    if (animTimer) return; // already running
+  slider.max = routePoints.length - 1;
 
-    animIndex = 0;
-    currentSpeedSimulated = null; // reset simulation
-    resetCharts();
-    startTimeMs = performance.now();
-    animTimer = setInterval(stepAnimation, 300); // 0.3s per point
-  });
-
-  btnPause.addEventListener("click", () => {
+  btnPlay.addEventListener("click", () => {
     if (animTimer) {
-      clearInterval(animTimer);
-      animTimer = null;
+      pauseAnim();
+    } else {
+      if (animIndex >= routePoints.length - 1) {
+        animIndex = 0;
+      }
+      if (!startTimeMs) startTimeMs = performance.now();
+      startAnim();
     }
   });
+
+  btnRewind.addEventListener("click", () => {
+    pauseAnim();
+    startTimeMs = null;
+    applyIndex(0);
+  });
+
+  btnBack.addEventListener("click",    () => applyIndex(animIndex - 10));
+  btnForward.addEventListener("click", () => applyIndex(animIndex + 10));
+
+  slider.addEventListener("input", () => {
+    pauseAnim();
+    applyIndex(parseInt(slider.value, 10));
+  });
+
+  // playback speed buttons
+  document.querySelectorAll(".speed-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      playbackSpeed = parseFloat(btn.dataset.speed);
+      document.querySelectorAll(".speed-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      if (animTimer) { pauseAnim(); startAnim(); } // restart with new interval
+    });
+  });
 }
 
+// ─────────────────────────────────────────
+// BOOTSTRAP
+// ─────────────────────────────────────────
 async function bootstrap() {
   try {
     await loadRoute();
@@ -228,12 +286,11 @@ async function bootstrap() {
     return;
   }
 
+  initGauge();
   initMap();
-  initCharts();
+  initCombinedChart();
   setupControls();
-
-  // Инициализировать значения на панели для первой точки
-  updateSidebar(routePoints[0], 0);
+  applyIndex(0);
 }
 
 document.addEventListener("DOMContentLoaded", bootstrap);

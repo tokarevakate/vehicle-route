@@ -27,10 +27,6 @@
         <h2>Параметры движения</h2>
 
         <div class="metric">
-          <span>Текущая скорость:</span>
-          <span id="metric-speed">–</span>
-        </div>
-        <div class="metric">
           <span>Время в пути:</span>
           <span id="metric-time">–</span>
         </div>
@@ -43,20 +39,42 @@
           <span id="metric-grade">–</span>
         </div>
 
-        <h3>Профиль высоты</h3>
-        <canvas id="chart-elevation"></canvas>
-
-        <h3>Профиль уклонов</h3>
-        <canvas id="chart-grade"></canvas>
-
+        <!-- Полудуговой gauge оптимальной скорости -->
         <h3>Оптимальная скорость</h3>
-        <div id="optimal-speed-block">
-          <span id="optimal-speed-value">–</span> км/ч
+        <div id="gauge-container">
+          <svg id="gauge-svg" viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+            <!-- Фоновая дуга -->
+            <path id="gauge-bg" d="" fill="none" stroke="#e0e0e0" stroke-width="14" stroke-linecap="round"/>
+            <!-- Цветная дуга значения -->
+            <path id="gauge-arc" d="" fill="none" stroke="#437a22" stroke-width="14" stroke-linecap="round"/>
+            <!-- Цифра скорости -->
+            <text id="gauge-value" x="100" y="100" text-anchor="middle" font-size="28" font-weight="700" fill="#28251d">0</text>
+            <text x="100" y="118" text-anchor="middle" font-size="11" fill="#7a7974">км/ч</text>
+          </svg>
         </div>
 
-        <div class="controls">
-          <button id="btn-start">Запустить анимацию</button>
-          <button id="btn-pause">Пауза</button>
+        <!-- Объединённый график высота + уклон -->
+        <h3>Профиль маршрута</h3>
+        <div id="chart-wrapper">
+          <canvas id="chart-combined"></canvas>
+        </div>
+
+        <!-- Транспортная панель -->
+        <div class="transport">
+          <div class="transport-row">
+            <input type="range" id="progress-slider" min="0" value="0" step="1" />
+          </div>
+          <div class="transport-row transport-btns">
+            <button id="btn-rewind" title="В начало">⏮</button>
+            <button id="btn-back" title="-10 точек">◀◀</button>
+            <button id="btn-playpause" title="Старт/Пауза">▶</button>
+            <button id="btn-forward" title="+10 точек">▶▶</button>
+            <span class="speed-label">Скорость:</span>
+            <button class="speed-btn active" data-speed="1">1×</button>
+            <button class="speed-btn" data-speed="0.5">0.5×</button>
+            <button class="speed-btn" data-speed="2">2×</button>
+            <button class="speed-btn" data-speed="4">4×</button>
+          </div>
         </div>
       </div>
     </div>
