@@ -9,7 +9,7 @@ from .consumption_model import build_speed_profile
 
 BASE_DIR = Path(__file__).resolve().parent
 # Use full route.csv as the single source of truth
-CSV_PATH = BASE_DIR.parent / "route.csv"
+CSV_PATH = BASE_DIR.parent / "route_sochi.csv"
 
 
 app = FastAPI(title="Vehicle Route Fuel Optimization API")
