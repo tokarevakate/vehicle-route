@@ -9,6 +9,25 @@ let animIndex = 0;
 let animTimer = null;
 let startTimeMs = null;
 
+// Simulated current speed with smoothed noise around optimal
+let currentSpeedSimulated = null;
+
+/** Return a simulated "actual" speed: optimal ± random noise clamped to [v-8, v+8]. */
+function simulateCurrentSpeed(optimalSpeed) {
+  if (currentSpeedSimulated === null) {
+    currentSpeedSimulated = optimalSpeed;
+  }
+  // Random walk: nudge toward optimal, add small noise
+  const noise = (Math.random() - 0.5) * 4.0;       // ±2 km/h per step
+  const pull  = (optimalSpeed - currentSpeedSimulated) * 0.15; // drift toward optimal
+  currentSpeedSimulated = currentSpeedSimulated + pull + noise;
+  // Clamp to ±8 km/h around optimal
+  const lo = Math.max(20, optimalSpeed - 8);
+  const hi = optimalSpeed + 8;
+  currentSpeedSimulated = Math.max(lo, Math.min(hi, currentSpeedSimulated));
+  return currentSpeedSimulated;
+}
+
 async function loadRoute() {
   const resp = await fetch("/api/route");
   if (!resp.ok) {
@@ -94,21 +113,36 @@ function initCharts() {
 }
 
 function updateSidebar(point, elapsedSeconds) {
-  const speedSpan = document.getElementById("metric-speed");
-  const timeSpan = document.getElementById("metric-time");
-  const distSpan = document.getElementById("metric-distance");
-  const gradeSpan = document.getElementById("metric-grade");
+  const speedSpan    = document.getElementById("metric-speed");
+  const timeSpan     = document.getElementById("metric-time");
+  const distSpan     = document.getElementById("metric-distance");
+  const gradeSpan    = document.getElementById("metric-grade");
   const optSpeedSpan = document.getElementById("optimal-speed-value");
 
-  const speed = point.speed_optimal ?? 0;
-  const distKm = (point.distance ?? 0) / 1000.0;
-  const grade = point.grade ?? 0;
+  const optSpeed = point.speed_optimal ?? 0;
+  const curSpeed = simulateCurrentSpeed(optSpeed);
 
-  speedSpan.textContent = speed.toFixed(1) + " км/ч";
-  timeSpan.textContent = elapsedSeconds.toFixed(0) + " с";
-  distSpan.textContent = distKm.toFixed(2) + " км";
+  const distKm = (point.distance ?? 0) / 1000.0;
+  const grade  = point.grade ?? 0;
+
+  // Current (simulated) speed
+  speedSpan.textContent = curSpeed.toFixed(1) + " км/ч";
+  timeSpan.textContent  = elapsedSeconds.toFixed(0) + " с";
+  distSpan.textContent  = distKm.toFixed(2) + " км";
   gradeSpan.textContent = grade.toFixed(2) + " %";
-  optSpeedSpan.textContent = speed.toFixed(1);
+
+  // Optimal speed from model
+  optSpeedSpan.textContent = optSpeed.toFixed(1);
+
+  // Visual hint: color the current speed red/green vs optimal
+  const diff = curSpeed - optSpeed;
+  if (Math.abs(diff) <= 2) {
+    speedSpan.style.color = "var(--color-success, #437a22)";
+  } else if (diff > 2) {
+    speedSpan.style.color = "var(--color-notification, #a13544)";
+  } else {
+    speedSpan.style.color = "var(--color-warning, #964219)";
+  }
 }
 
 function updateCharts(point) {
@@ -138,7 +172,7 @@ function stepAnimation() {
     return;
   }
 
-  const point = routePoints[animIndex];
+  const point  = routePoints[animIndex];
   const latlng = [point.lat, point.lon];
 
   marker.setLatLng(latlng);
@@ -148,7 +182,7 @@ function stepAnimation() {
     .map((p) => [p.lat, p.lon]);
   passedPolyline.setLatLngs(passedLatLngs);
 
-  const now = performance.now();
+  const now            = performance.now();
   const elapsedSeconds = (now - startTimeMs) / 1000.0;
 
   updateSidebar(point, elapsedSeconds);
@@ -166,6 +200,7 @@ function setupControls() {
     if (animTimer) return; // already running
 
     animIndex = 0;
+    currentSpeedSimulated = null; // reset simulation
     resetCharts();
     startTimeMs = performance.now();
     animTimer = setInterval(stepAnimation, 300); // 0.3s per point
