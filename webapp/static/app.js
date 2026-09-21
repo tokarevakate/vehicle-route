@@ -7,17 +7,16 @@ let combinedChart = null;
 let animIndex = 0;
 let animTimer = null;
 let startTimeMs = null;
-let playbackSpeed = 1;        // multiplier: 0.5 / 1 / 2 / 4
-const BASE_INTERVAL_MS = 300; // base ms per point at 1×
+let playbackSpeed = 1;
+const BASE_INTERVAL_MS = 300;
 
 // ─────────────────────────────────────────
-// GAUGE helpers
+// GAUGE
 // ─────────────────────────────────────────
 const GAUGE_V_MIN = 0;
 const GAUGE_V_MAX = 90;
 const GAUGE_CX = 100, GAUGE_CY = 108, GAUGE_R = 80;
-const GAUGE_START_DEG = 210; // degrees, clockwise from +x
-const GAUGE_END_DEG   = 330; // total sweep = 240°
+const GAUGE_START_DEG = 210;
 
 function degToRad(d) { return d * Math.PI / 180; }
 
@@ -33,25 +32,20 @@ function arcPath(cx, cy, r, startDeg, endDeg) {
 }
 
 function initGauge() {
-  const bg = document.getElementById("gauge-bg");
-  bg.setAttribute("d", arcPath(GAUGE_CX, GAUGE_CY, GAUGE_R, GAUGE_START_DEG, GAUGE_START_DEG + 240));
+  document.getElementById("gauge-bg")
+    .setAttribute("d", arcPath(GAUGE_CX, GAUGE_CY, GAUGE_R, GAUGE_START_DEG, GAUGE_START_DEG + 240));
 }
 
 function updateGauge(speed) {
   const arc   = document.getElementById("gauge-arc");
   const label = document.getElementById("gauge-value");
-
-  const pct    = Math.min(1, Math.max(0, (speed - GAUGE_V_MIN) / (GAUGE_V_MAX - GAUGE_V_MIN)));
-  const sweep  = pct * 240;
-  arc.setAttribute("d", arcPath(GAUGE_CX, GAUGE_CY, GAUGE_R, GAUGE_START_DEG, GAUGE_START_DEG + sweep));
-
-  // colour: green → yellow → red
+  const pct   = Math.min(1, Math.max(0, (speed - GAUGE_V_MIN) / (GAUGE_V_MAX - GAUGE_V_MIN)));
+  arc.setAttribute("d", arcPath(GAUGE_CX, GAUGE_CY, GAUGE_R, GAUGE_START_DEG, GAUGE_START_DEG + pct * 240));
   let color;
   if (speed <= 50)      color = "#437a22";
   else if (speed <= 65) color = "#d19900";
   else                  color = "#a13544";
   arc.setAttribute("stroke", color);
-
   label.textContent = speed.toFixed(1);
   label.setAttribute("fill", color);
 }
@@ -73,23 +67,47 @@ function initMap() {
   if (!routePoints.length) return;
   leafletMap = L.map("map");
   const latlngs = routePoints.map(p => [p.lat, p.lon]);
-  mainPolyline  = L.polyline(latlngs, { color: "#01696f" }).addTo(leafletMap);
-  passedPolyline= L.polyline([], { color: "#da7101" }).addTo(leafletMap);
+  mainPolyline   = L.polyline(latlngs, { color: "#01696f" }).addTo(leafletMap);
+  passedPolyline = L.polyline([], { color: "#da7101" }).addTo(leafletMap);
   leafletMap.fitBounds(mainPolyline.getBounds());
   marker = L.marker(latlngs[0]).addTo(leafletMap);
 }
 
 // ─────────────────────────────────────────
-// COMBINED CHART  (elevation area + grade bars, cursor line)
+// CURSOR PLUGIN — declared BEFORE initCombinedChart
+// ─────────────────────────────────────────
+const cursorPlugin = {
+  id: "cursor",
+  afterDraw(chart) {
+    if (animIndex <= 0 || !routePoints.length) return;
+    const meta = chart.getDatasetMeta(0);
+    if (!meta.data || !meta.data[animIndex]) return;
+    const x   = meta.data[animIndex].x;
+    const ctx  = chart.ctx;
+    const yTop = chart.chartArea.top;
+    const yBot = chart.chartArea.bottom;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x, yTop);
+    ctx.lineTo(x, yBot);
+    ctx.strokeStyle = "rgba(161,53,68,0.8)";
+    ctx.lineWidth   = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.stroke();
+    ctx.restore();
+  },
+};
+
+// ─────────────────────────────────────────
+// COMBINED CHART
 // ─────────────────────────────────────────
 function initCombinedChart() {
   const ctx = document.getElementById("chart-combined").getContext("2d");
 
-  const labels   = routePoints.map((_, i) => i);
-  const elevData = routePoints.map(p => p.elevation ?? 0);
-  const gradeData= routePoints.map(p => p.grade ?? 0);
+  const labels    = routePoints.map((_, i) => i);
+  const elevData  = routePoints.map(p => p.elevation ?? 0);
+  const gradeData = routePoints.map(p => p.grade ?? 0);
 
-  // Build gradient for elevation (green→brown→grey)
   const gradient = ctx.createLinearGradient(0, 0, 0, 200);
   gradient.addColorStop(0,   "rgba(150,100,50,0.7)");
   gradient.addColorStop(0.5, "rgba(80,140,60,0.5)");
@@ -129,40 +147,16 @@ function initCombinedChart() {
       interaction: { mode: "index", intersect: false },
       scales: {
         x: { display: false },
-        yElev:  { position: "left",  title: { display: true, text: "м" },    grid: { drawOnChartArea: true  } },
-        yGrade: { position: "right", title: { display: true, text: "%" },    grid: { drawOnChartArea: false } },
+        yElev:  { position: "left",  title: { display: true, text: "м" }, grid: { drawOnChartArea: true  } },
+        yGrade: { position: "right", title: { display: true, text: "%" }, grid: { drawOnChartArea: false } },
       },
       plugins: {
         legend: { display: true, position: "bottom", labels: { boxWidth: 12, font: { size: 11 } } },
-        // cursor vertical line drawn via custom plugin below
       },
     },
     plugins: [cursorPlugin],
   });
 }
-
-// Custom Chart.js plugin — draws vertical cursor line at current animIndex
-const cursorPlugin = {
-  id: "cursor",
-  afterDraw(chart) {
-    if (animIndex <= 0 || !routePoints.length) return;
-    const meta = chart.getDatasetMeta(0);
-    if (!meta.data || !meta.data[animIndex]) return;
-    const x   = meta.data[animIndex].x;
-    const ctx  = chart.ctx;
-    const yTop = chart.chartArea.top;
-    const yBot = chart.chartArea.bottom;
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(x, yTop);
-    ctx.lineTo(x, yBot);
-    ctx.strokeStyle = "rgba(161,53,68,0.8)";
-    ctx.lineWidth   = 1.5;
-    ctx.setLineDash([4, 3]);
-    ctx.stroke();
-    ctx.restore();
-  },
-};
 
 // ─────────────────────────────────────────
 // SIDEBAR METRICS
@@ -175,36 +169,25 @@ function updateSidebar(point, elapsedSeconds) {
 }
 
 // ─────────────────────────────────────────
-// ANIMATION STEP
+// ANIMATION
 // ─────────────────────────────────────────
 function applyIndex(idx) {
   if (idx < 0) idx = 0;
   if (idx >= routePoints.length) idx = routePoints.length - 1;
   animIndex = idx;
 
-  const point  = routePoints[animIndex];
-  const latlng = [point.lat, point.lon];
-  marker.setLatLng(latlng);
-
-  passedPolyline.setLatLngs(
-    routePoints.slice(0, animIndex + 1).map(p => [p.lat, p.lon])
-  );
+  const point = routePoints[animIndex];
+  marker.setLatLng([point.lat, point.lon]);
+  passedPolyline.setLatLngs(routePoints.slice(0, animIndex + 1).map(p => [p.lat, p.lon]));
 
   const elapsed = startTimeMs ? (performance.now() - startTimeMs) / 1000 : 0;
   updateSidebar(point, elapsed);
-
-  // update slider
   document.getElementById("progress-slider").value = animIndex;
-
-  // redraw chart cursor
   combinedChart.update("none");
 }
 
 function stepAnimation() {
-  if (animIndex >= routePoints.length - 1) {
-    pauseAnim();
-    return;
-  }
+  if (animIndex >= routePoints.length - 1) { pauseAnim(); return; }
   applyIndex(animIndex + 1);
 }
 
@@ -215,8 +198,7 @@ function pauseAnim() {
 
 function startAnim() {
   if (animTimer) clearInterval(animTimer);
-  const interval = BASE_INTERVAL_MS / playbackSpeed;
-  animTimer = setInterval(stepAnimation, interval);
+  animTimer = setInterval(stepAnimation, BASE_INTERVAL_MS / playbackSpeed);
   document.getElementById("btn-playpause").textContent = "⏸";
 }
 
@@ -224,47 +206,36 @@ function startAnim() {
 // CONTROLS
 // ─────────────────────────────────────────
 function setupControls() {
-  const slider     = document.getElementById("progress-slider");
-  const btnPlay    = document.getElementById("btn-playpause");
-  const btnRewind  = document.getElementById("btn-rewind");
-  const btnBack    = document.getElementById("btn-back");
-  const btnForward = document.getElementById("btn-forward");
+  const slider = document.getElementById("progress-slider");
+  slider.max   = routePoints.length - 1;
 
-  slider.max = routePoints.length - 1;
-
-  btnPlay.addEventListener("click", () => {
+  document.getElementById("btn-playpause").addEventListener("click", () => {
     if (animTimer) {
       pauseAnim();
     } else {
-      if (animIndex >= routePoints.length - 1) {
-        animIndex = 0;
-      }
+      if (animIndex >= routePoints.length - 1) animIndex = 0;
       if (!startTimeMs) startTimeMs = performance.now();
       startAnim();
     }
   });
 
-  btnRewind.addEventListener("click", () => {
-    pauseAnim();
-    startTimeMs = null;
-    applyIndex(0);
+  document.getElementById("btn-rewind").addEventListener("click", () => {
+    pauseAnim(); startTimeMs = null; applyIndex(0);
   });
-
-  btnBack.addEventListener("click",    () => applyIndex(animIndex - 10));
-  btnForward.addEventListener("click", () => applyIndex(animIndex + 10));
+  document.getElementById("btn-back").addEventListener("click",    () => applyIndex(animIndex - 10));
+  document.getElementById("btn-forward").addEventListener("click", () => applyIndex(animIndex + 10));
 
   slider.addEventListener("input", () => {
     pauseAnim();
     applyIndex(parseInt(slider.value, 10));
   });
 
-  // playback speed buttons
   document.querySelectorAll(".speed-btn").forEach(btn => {
     btn.addEventListener("click", () => {
       playbackSpeed = parseFloat(btn.dataset.speed);
       document.querySelectorAll(".speed-btn").forEach(b => b.classList.remove("active"));
       btn.classList.add("active");
-      if (animTimer) { pauseAnim(); startAnim(); } // restart with new interval
+      if (animTimer) { pauseAnim(); startAnim(); }
     });
   });
 }
@@ -280,11 +251,7 @@ async function bootstrap() {
     alert("Ошибка загрузки маршрута. См. консоль браузера.");
     return;
   }
-
-  if (!routePoints.length) {
-    alert("Маршрут пустой или данные не найдены.");
-    return;
-  }
+  if (!routePoints.length) { alert("Маршрут пустой."); return; }
 
   initGauge();
   initMap();
