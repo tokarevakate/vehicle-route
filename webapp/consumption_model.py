@@ -18,11 +18,7 @@ class VehicleParams:
 
 @dataclass
 class FuelCoeffs:
-    """Коэффициенты модели q(v,G,R) = a0 + a1*v + a2*v² + b1*G + c1*v²/R.
-
-    Можно задать вручную (из YAML/конфига) или вывести из физики через
-    FuelCoeffs.from_vehicle(params).
-    """
+    """Коэффициенты модели q(v,G,R) = a0 + a1*v + a2*v² + b1*G + c1*v²/R."""
     a0: float =  6.70
     a1: float = -0.081
     a2: float =  0.000855
@@ -31,7 +27,7 @@ class FuelCoeffs:
 
     @classmethod
     def from_vehicle(cls, params: VehicleParams) -> "FuelCoeffs":
-        """Вывести a0, a1, a2 из физики автомобиля (только numpy)."""
+        """Вывести a0, a1, a2 из физики автомобиля."""
         g_acc    = 9.81
         Hv       = 43.4e6
         eta_eff  = 0.25
@@ -51,7 +47,7 @@ class FuelCoeffs:
             L_dot   = (P_fuel / Hv) / rho_fuel
             return L_dot / v * 1e5 + idle_lph / v_kmh * 100
 
-        # --- a0, a1, a2: МНК через np.linalg.lstsq (scipy не нужен) ---
+        # --- a0, a1, a2: МНК через np.linalg.lstsq ---
         v_range = np.arange(10, 131, 1.0)
         q_phys  = np.array([physical_q(v) for v in v_range])
         A = np.column_stack([np.ones_like(v_range), v_range, v_range**2])
