@@ -42,6 +42,12 @@ def _detect_column(columns, candidates):
     for c in candidates:
         if c in columns:
             return c
+    # FIX 3: case-insensitive fallback for non-standard CSV headers
+    columns_list = list(columns)
+    columns_lower = [c.lower() for c in columns_list]
+    for cand in candidates:
+        if cand.lower() in columns_lower:
+            return columns_list[columns_lower.index(cand.lower())]
     return None
 
 
@@ -90,6 +96,9 @@ def fit_elevation_model(raw_points: List[RawPoint], degree: int = 5):
     """
     s = np.array([p.distance for p in raw_points])
     h = np.array([p.elevation for p in raw_points])
+
+    # FIX 4: clamp degree to avoid rank-deficient polyfit on short routes
+    degree = min(degree, max(len(raw_points) - 1, 1))
 
     # center distances for numerical stability
     s_mean = s.mean()
@@ -149,9 +158,14 @@ def resample_route(
 
 
 def _heading(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Approximate heading between two points (radians)."""
-    y = math.radians(lat2 - lat1)
-    x = math.radians(lon2 - lon1) * math.cos(math.radians((lat1 + lat2) / 2.0))
+    """Great-circle bearing between two WGS84 points (radians)."""
+    # FIX 1: replaced flat-earth approximation with correct spherical formula
+    lat1_r = math.radians(lat1)
+    lat2_r = math.radians(lat2)
+    dlon_r = math.radians(lon2 - lon1)
+    x = math.sin(dlon_r) * math.cos(lat2_r)
+    y = (math.cos(lat1_r) * math.sin(lat2_r)
+         - math.sin(lat1_r) * math.cos(lat2_r) * math.cos(dlon_r))
     return math.atan2(y, x)
 
 
@@ -178,7 +192,8 @@ def compute_curvature(
         while dtheta < -math.pi:
             dtheta += 2.0 * math.pi
 
-        ds = s[i + 1] - s[i - 1]
+        # FIX 2: each heading spans one arc; divide total span by 2
+        ds = (s[i + 1] - s[i - 1]) / 2.0
         if ds <= 0 or abs(dtheta) < 1e-6:
             radii[i] = None
         else:

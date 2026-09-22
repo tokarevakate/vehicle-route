@@ -102,7 +102,13 @@ def optimal_speed(
     if v_min <= v_analytical <= v_max:
         return v_analytical
 
-    v_arr  = np.arange(v_min, v_max + 1, 1.0)
+    # FIX 1: guard against empty grid when curvature cap forces v_min >= v_max
+    if v_min >= v_max:
+        return v_min
+
+    v_arr  = np.arange(v_min, v_max + 0.5, 1.0)
+    if len(v_arr) == 0:
+        return v_min
     q_vals = [fuel_consumption_model(v, grade_percent, radius, coeffs) for v in v_arr]
     return float(v_arr[np.argmin(q_vals)])
 
@@ -125,11 +131,17 @@ def build_speed_profile(
 
     result: List[dict] = []
     fuel_cum = 0.0
+    # FIX 2: track previous cumulative distance to compute per-segment length
+    prev_s = profile[0].s if profile else 0.0
 
     for p in profile:
         v_opt = optimal_speed(p.grade, p.radius, coeffs)
         q_val = fuel_consumption_model(v_opt, p.grade, p.radius, coeffs)
-        fuel_cum += q_val
+
+        # FIX 2: fuel_cumulative in litres = q [L/100km] * distance [km] / 100
+        segment_km = (p.s - prev_s) / 1000.0
+        prev_s = p.s
+        fuel_cum += q_val * segment_km / 100.0
 
         result.append(
             {
@@ -137,12 +149,12 @@ def build_speed_profile(
                 "lat":             p.lat,
                 "lon":             p.lon,
                 "elevation":       p.elevation,
-                "distance":        p.s,
+                "distance":        round(p.s, 3),
                 "grade":           p.grade,
                 "radius":          p.radius,
                 "speed_optimal":   v_opt,
-                "fuel_proxy":      q_val,
-                "fuel_cumulative": fuel_cum,
+                "fuel_proxy":      round(q_val, 4),
+                "fuel_cumulative": round(fuel_cum, 6),
             }
         )
 
