@@ -8,8 +8,8 @@ from .profile_model import build_profile
 from .consumption_model import build_speed_profile
 
 BASE_DIR = Path(__file__).resolve().parent
-# route_sochi.csv is the single source of truth for the route .
-CSV_PATH = BASE_DIR.parent / "route_sochi.csv"
+
+CSV_PATH = BASE_DIR.parent / "route_restored.csv"
 
 
 app = FastAPI(title="Vehicle Route Fuel Optimization API")

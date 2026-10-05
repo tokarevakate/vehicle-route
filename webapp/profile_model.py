@@ -59,15 +59,15 @@ def load_raw_points_from_csv(csv_path) -> List[RawPoint]:
     lon_col  = _detect_column(cols, ["lon", "lng", "longitude", "Lon", "LON"])
     elev_col = _detect_column(cols, ["elev", "elevation", "alt", "height", "altitude", "ALT"])
 
-    if lat_col is None or lon_col is None:
+    if lat_col is None or lon_col is None or elev_col is None:
         raise RuntimeError(
-            "Could not detect latitude/longitude columns in route.csv. "
-            "Expected one of: lat/latitude and lon/lng/longitude."
+            "Could not detect latitude/longitude/elevation columns in route.csv. "
+            "Expected one of: lat/latitude and lon/lng/longitude and elev/elevation."
         )
 
     lats  = df[lat_col].astype(float).to_list()
     lons  = df[lon_col].astype(float).to_list()
-    elevs = df[elev_col].astype(float).to_list() if elev_col is not None else [0.0] * len(lats)
+    elevs = df[elev_col].astype(float).to_list()
 
     distances = [0.0]
     for i in range(1, len(lats)):
