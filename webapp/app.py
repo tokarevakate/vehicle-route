@@ -1,12 +1,12 @@
 from pathlib import Path
 
-import pandas as pd
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .consumption_model import build_speed_profile, ProfilePoint
+from .consumption_model import build_speed_profile
+from .profile_model import build_profile
 
 BASE_DIR = Path(__file__).resolve().parent
 CSV_PATH = BASE_DIR.parent / "route_restored.csv"
@@ -20,20 +20,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-df = pd.read_csv(CSV_PATH)
-PROFILE_POINTS = [
-    ProfilePoint(
-        index=int(r["index"]),
-        s=float(r["s"]),
-        lat=float(r["lat"]),
-        lon=float(r["lon"]),
-        elevation=float(r["elevation"]),
-        grade=float(r["grade"]),
-        radius=None if pd.isna(r["radius"]) else float(r["radius"]),
-    )
-    for r in df.to_dict("records")
-]
-
+# route_restored.csv (timestamp, lat, lon, elevation, source) -> s, grade, radius
+PROFILE_POINTS = build_profile(CSV_PATH, target_points=10000)
 ROUTE_POINTS = build_speed_profile(PROFILE_POINTS)
 
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")

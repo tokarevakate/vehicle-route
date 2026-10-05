@@ -5,17 +5,7 @@ from typing import List, Optional
 import numpy as np
 from scipy.optimize import minimize_scalar
 
-#from .profile_model import ProfilePoint
-@dataclass
-class ProfilePoint:
-    index: int
-    s: float
-    lat: float
-    lon: float
-    elevation: float
-    grade: float
-    radius: Optional[float]
-
+from .profile_model import ProfilePoint
 
 
 @dataclass
