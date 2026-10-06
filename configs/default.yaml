@@ -1,0 +1,32 @@
+default_algorithm: dp
+
+route:
+  csv_path: route_restored.csv
+  target_spacing_m: 50.0
+  elevation_smoothing_m2_per_point: 1.0
+
+vehicle:
+  mass_kg: 1500.0
+  rotating_mass_factor: 1.04
+  cd: 0.29
+  frontal_area_m2: 2.2
+  rho_air_kg_m3: 1.2
+  rolling_coeff: 0.010
+  drivetrain_efficiency: 0.92
+  idle_fuel_lph: 0.6
+  max_power_kw: 110.0
+  max_tractive_force_n: 5500.0
+  max_brake_force_n: 9000.0
+
+optimization:
+  v_min_kmh: 20.0
+  v_max_kmh: 90.0
+  speed_step_kmh: 2.0
+  start_speed_kmh: 30.0
+  end_speed_kmh: null
+  accel_min_mps2: -2.5
+  accel_max_mps2: 1.5
+  lateral_accel_max_mps2: 2.0
+  time_weight_l_per_s: 0.00002
+  brake_weight_l_per_kwh: 0.02
+  accel_weight: 0.00001
