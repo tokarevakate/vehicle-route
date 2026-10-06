@@ -10,12 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import load_config
-from .optimization import (
-    optimize_dynamic_programming,
-    optimize_mpc,
-    optimize_pointwise,
-    result_to_points,
-)
+from .optimization import optimize_dynamic_programming, optimize_pointwise, result_to_points
 from .profile_model import build_profile
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -61,21 +56,22 @@ def _calculate(algorithm: str):
         return optimize_pointwise(profile, config.vehicle, config.optimization)
     if algorithm == "dp":
         return optimize_dynamic_programming(profile, config.vehicle, config.optimization)
-    if algorithm == "mpc":
-        return optimize_mpc(profile, config.vehicle, config.optimization)
     raise ValueError(f"Unknown algorithm: {algorithm}")
 
 
 @app.get("/api/route")
 def get_route(
-    algorithm: Literal["pointwise", "dp", "mpc"] | None = Query(default=None),
+    algorithm: Literal["pointwise", "dp"] | None = Query(default=None),
 ):
     selected = algorithm or app.state.config.default_algorithm
     if selected not in app.state.results:
         app.state.results[selected] = _calculate(selected)
     result = app.state.results[selected]
     if result.status != "optimal":
-        raise HTTPException(status_code=422, detail={"algorithm": selected, "status": result.status})
+        raise HTTPException(
+            status_code=422,
+            detail={"algorithm": selected, "status": result.status},
+        )
     return {
         "algorithm": selected,
         "metrics": result.summary(),

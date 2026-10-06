@@ -30,6 +30,3 @@ optimization:
   time_weight_l_per_s: 0.00002
   brake_weight_l_per_kwh: 0.02
   accel_weight: 0.00001
-  jerk_weight: 0.0
-  mpc_horizon_m: 1000.0
-  mpc_apply_segments: 5
