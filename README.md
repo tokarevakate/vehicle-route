@@ -22,9 +22,9 @@ $$
 
 ```
 vehicle-route/
-├── route_sochi.csv           # исходные данные маршрута (380 точек)
-├── route.csv                 # другой набор данных (приложением не используется)
-├── route_reduced.csv         # другой набор данных (приложением не используется)
+├── route_sochi.csv           
+├── route.csv                  
+├── route_reduced.csv         
 └── webapp/
     ├── app.py                # сервер и REST API
     ├── profile_model.py      # модуль 1: профиль маршрута
