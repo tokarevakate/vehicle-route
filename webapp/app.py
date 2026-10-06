@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
@@ -9,17 +10,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .config import load_config
+from .config import ALGORITHMS, load_config
 from .optimization import optimize_dynamic_programming, optimize_pointwise, result_to_points
 from .profile_model import build_profile
 
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = BASE_DIR.parent
 
+_locks = {name: threading.Lock() for name in ALGORITHMS}
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    config = load_config(PROJECT_DIR / "configs" / "default.yaml")
+    config = load_config()
     csv_path = Path(config.route.csv_path)
     if not csv_path.is_absolute():
         csv_path = PROJECT_DIR / csv_path
@@ -59,14 +62,24 @@ def _calculate(algorithm: str):
     raise ValueError(f"Unknown algorithm: {algorithm}")
 
 
+def _get_result(algorithm: str):
+    cached = app.state.results.get(algorithm)
+    if cached is not None:
+        return cached
+    with _locks[algorithm]:
+        cached = app.state.results.get(algorithm)
+        if cached is None:
+            cached = _calculate(algorithm)
+            app.state.results[algorithm] = cached
+    return cached
+
+
 @app.get("/api/route")
 def get_route(
     algorithm: Literal["pointwise", "dp"] | None = Query(default=None),
 ):
     selected = algorithm or app.state.config.default_algorithm
-    if selected not in app.state.results:
-        app.state.results[selected] = _calculate(selected)
-    result = app.state.results[selected]
+    result = _get_result(selected)
     if result.status != "optimal":
         raise HTTPException(
             status_code=422,
@@ -80,5 +93,9 @@ def get_route(
 
 
 @app.get("/api/metrics")
-def get_metrics():
-    return {name: result.summary() for name, result in app.state.results.items()}
+def get_metrics(compute: bool = Query(default=False)):
+    """Metrics of already computed algorithms; ``compute=true`` calculates all of them."""
+    if compute:
+        for name in ALGORITHMS:
+            _get_result(name)
+    return {name: result.summary() for name, result in list(app.state.results.items())}

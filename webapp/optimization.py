@@ -10,6 +10,8 @@ from scipy.optimize import minimize_scalar
 from .profile_model import ProfilePoint
 from .vehicle_model import VehicleParams, evaluate_transition, steady_fuel_l_per_100km
 
+MIN_GRID_SPEED_KMH = 5.0
+
 
 @dataclass(frozen=True)
 class OptimizationConfig:
@@ -24,6 +26,28 @@ class OptimizationConfig:
     time_weight_l_per_s: float = 0.00002
     brake_weight_l_per_kwh: float = 0.02
     accel_weight: float = 0.00001
+
+    def __post_init__(self) -> None:
+        if self.speed_step_kmh <= 0.0:
+            raise ValueError("speed_step_kmh must be positive")
+        if not 0.0 < self.v_min_kmh <= self.v_max_kmh:
+            raise ValueError("Expected 0 < v_min_kmh <= v_max_kmh")
+        if self.start_speed_kmh <= 0.0:
+            raise ValueError("start_speed_kmh must be positive")
+        if self.end_speed_kmh is not None and self.end_speed_kmh <= 0.0:
+            raise ValueError("end_speed_kmh must be positive or null")
+        if not self.accel_min_mps2 < 0.0 < self.accel_max_mps2:
+            raise ValueError("Expected accel_min_mps2 < 0 < accel_max_mps2")
+        if self.lateral_accel_max_mps2 <= 0.0:
+            raise ValueError("lateral_accel_max_mps2 must be positive")
+        for name in ("time_weight_l_per_s", "brake_weight_l_per_kwh", "accel_weight"):
+            if getattr(self, name) < 0.0:
+                raise ValueError(f"{name} must be non-negative")
+
+
+def _finite_or_none(value: float) -> Optional[float]:
+    value = float(value)
+    return value if math.isfinite(value) else None
 
 
 @dataclass
@@ -53,12 +77,12 @@ class OptimizationResult:
         return {
             "method": self.method,
             "status": self.status,
-            "objective": self.objective,
-            "total_fuel_l": self.total_fuel_l,
-            "total_time_s": self.total_time_s,
-            "brake_energy_kwh": float(np.sum(self.brake_energy_kwh)),
-            "max_accel_mps2": float(np.max(self.acceleration_mps2, initial=0.0)),
-            "min_accel_mps2": float(np.min(self.acceleration_mps2, initial=0.0)),
+            "objective": _finite_or_none(self.objective),
+            "total_fuel_l": _finite_or_none(self.total_fuel_l),
+            "total_time_s": _finite_or_none(self.total_time_s),
+            "brake_energy_kwh": _finite_or_none(np.sum(self.brake_energy_kwh)),
+            "max_accel_mps2": _finite_or_none(np.max(self.acceleration_mps2, initial=0.0)),
+            "min_accel_mps2": _finite_or_none(np.min(self.acceleration_mps2, initial=0.0)),
         }
 
 
@@ -88,6 +112,29 @@ def _empty_result(method: str, n: int, status: str) -> OptimizationResult:
     )
 
 
+def _build_speed_grid(limits: np.ndarray, config: OptimizationConfig) -> np.ndarray:
+    """Speed grid anchored at v_min, extended downwards where curves force lower speeds."""
+    step = config.speed_step_kmh
+    floor = max(min(config.v_min_kmh, float(np.min(limits))), MIN_GRID_SPEED_KMH)
+    extra = int(math.ceil(max(config.v_min_kmh - floor, 0.0) / step - 1e-9))
+    start = config.v_min_kmh - extra * step
+    grid = np.arange(start, config.v_max_kmh + 0.5 * step, step)
+    return grid[grid >= 1.0]
+
+
+def _allowed_indices(speeds_kmh: np.ndarray, limit_kmh: float, v_min_kmh: float) -> np.ndarray:
+    """Grid speeds in [v_min, limit]; if the curve limit is below v_min, the fastest safe speed."""
+    within = np.flatnonzero(
+        (speeds_kmh <= limit_kmh + 1e-9) & (speeds_kmh >= v_min_kmh - 1e-9)
+    )
+    if within.size:
+        return within
+    below = np.flatnonzero(speeds_kmh <= limit_kmh + 1e-9)
+    if below.size:
+        return below[-1:]
+    return np.array([0], dtype=int)
+
+
 def optimize_dynamic_programming(
     profile: list[ProfilePoint],
     params: Optional[VehicleParams] = None,
@@ -100,27 +147,19 @@ def optimize_dynamic_programming(
     if n < 2:
         return _empty_result(method_name, n, "route_too_short")
 
-    speeds_kmh = np.arange(
-        config.v_min_kmh,
-        config.v_max_kmh + 0.5 * config.speed_step_kmh,
-        config.speed_step_kmh,
-    )
+    limits = np.array([curvature_speed_limit_kmh(p, config) for p in profile])
+    speeds_kmh = _build_speed_grid(limits, config)
     speeds_mps = speeds_kmh / 3.6
     m = len(speeds_kmh)
-    limits = np.array([curvature_speed_limit_kmh(p, config) for p in profile])
+    allowed = [_allowed_indices(speeds_kmh, limit, config.v_min_kmh) for limit in limits]
     parents = np.full((n, m), -1, dtype=np.int16 if m < 32767 else np.int32)
     costs = np.full(m, np.inf)
-    start_idx = int(np.argmin(np.abs(speeds_kmh - config.start_speed_kmh)))
-    if speeds_kmh[start_idx] > limits[0] + 1e-9:
-        start_idx = int(
-            np.argmin(
-                np.where(
-                    speeds_kmh <= limits[0],
-                    np.abs(speeds_kmh - config.start_speed_kmh),
-                    np.inf,
-                )
-            )
-        )
+    start_candidates = allowed[0]
+    start_idx = int(
+        start_candidates[
+            np.argmin(np.abs(speeds_kmh[start_candidates] - config.start_speed_kmh))
+        ]
+    )
     costs[start_idx] = 0.0
 
     for k in range(n - 1):
@@ -129,7 +168,7 @@ def optimize_dynamic_programming(
             return _empty_result(method_name, n, f"non_increasing_distance_at_{k}")
         grade = 0.5 * (profile[k].grade + profile[k + 1].grade)
         next_costs = np.full(m, np.inf)
-        allowed_next = np.flatnonzero(speeds_kmh <= limits[k + 1] + 1e-9)
+        allowed_next = allowed[k + 1]
         for i in np.flatnonzero(np.isfinite(costs)):
             accel = (speeds_mps[allowed_next] ** 2 - speeds_mps[i] ** 2) / (2.0 * ds)
             reachable = allowed_next[
