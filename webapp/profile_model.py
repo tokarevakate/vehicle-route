@@ -37,7 +37,10 @@ def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
     dphi = math.radians(lat2 - lat1)
     dlambda = math.radians(lon2 - lon1)
-    a = math.sin(dphi / 2.0) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2.0) ** 2
+    a = (
+        math.sin(dphi / 2.0) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2.0) ** 2
+    )
     return radius_earth * 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
 
 
@@ -62,7 +65,10 @@ def load_raw_points_from_csv(csv_path) -> List[RawPoint]:
     df = pd.read_csv(csv_path)
     lat_col = _detect_column(df.columns, ["lat", "latitude"])
     lon_col = _detect_column(df.columns, ["lon", "lng", "longitude"])
-    elev_col = _detect_column(df.columns, ["elev", "elevation", "alt", "height", "altitude"])
+    elev_col = _detect_column(
+        df.columns,
+        ["elev", "elevation", "alt", "height", "altitude"],
+    )
     source_col = _detect_column(df.columns, ["source", "quality", "status"])
     if lat_col is None or lon_col is None or elev_col is None:
         raise RuntimeError("CSV must contain latitude, longitude and elevation columns")
@@ -74,14 +80,20 @@ def load_raw_points_from_csv(csv_path) -> List[RawPoint]:
         raise ValueError("Route must contain at least two valid points")
     confidences = (
         df.loc[valid, source_col].map(_source_confidence).to_numpy(dtype=float)
-        if source_col is not None else np.ones(len(numeric))
+        if source_col is not None
+        else np.ones(len(numeric))
     )
     lats = numeric[lat_col].to_numpy(dtype=float)
     lons = numeric[lon_col].to_numpy(dtype=float)
     elevations = numeric[elev_col].to_numpy(dtype=float)
     distances = np.zeros(len(numeric))
     for i in range(1, len(numeric)):
-        distances[i] = distances[i - 1] + _haversine(lats[i - 1], lons[i - 1], lats[i], lons[i])
+        distances[i] = distances[i - 1] + _haversine(
+            lats[i - 1],
+            lons[i - 1],
+            lats[i],
+            lons[i],
+        )
     keep = np.r_[True, np.diff(distances) > 1e-3]
     return [
         RawPoint(i, float(lat), float(lon), float(elev), float(distance), float(confidence))
@@ -98,17 +110,37 @@ def fit_elevation_model(raw_points: List[RawPoint], smoothing_m2_per_point: floa
     s_mean = float(np.mean(s))
     x = s - s_mean
     if len(s) >= 4:
-        spline = UnivariateSpline(x, h, w=weights, s=max(smoothing_m2_per_point, 0.0) * len(s), ext=3)
-        elevation = lambda query: spline(np.asarray(query) - s_mean)
-        grade = lambda query: 100.0 * spline(np.asarray(query) - s_mean, 1)
+        spline = UnivariateSpline(
+            x,
+            h,
+            w=weights,
+            s=max(smoothing_m2_per_point, 0.0) * len(s),
+            ext=3,
+        )
+
+        def elevation(query):
+            return spline(np.asarray(query) - s_mean)
+
+        def grade(query):
+            return 100.0 * spline(np.asarray(query) - s_mean, 1)
+
     else:
         spline = CubicSpline(x, h, bc_type="natural")
-        elevation = lambda query: spline(np.asarray(query) - s_mean)
-        grade = lambda query: 100.0 * spline(np.asarray(query) - s_mean, 1)
+
+        def elevation(query):
+            return spline(np.asarray(query) - s_mean)
+
+        def grade(query):
+            return 100.0 * spline(np.asarray(query) - s_mean, 1)
+
     return elevation, grade
 
 
-def compute_curvature(s: np.ndarray, lats: np.ndarray, lons: np.ndarray) -> List[Optional[float]]:
+def compute_curvature(
+    s: np.ndarray,
+    lats: np.ndarray,
+    lons: np.ndarray,
+) -> List[Optional[float]]:
     n = len(s)
     if n < 3:
         return [None] * n
